@@ -23,7 +23,12 @@ namespace EFlag {
 	public:
 		void wait(Flag pattern, MatchMode mode);
 		bool timed_wait(Flag pattern, MatchMode mode, std::chrono::milliseconds millisec);
+		static constexpr Flag kAllBits = ~Flag{ 0 };
+
 		void set(Flag pattern);
+		// pattern で指定したビットを落とす（省略時は全ビット）。
+		// ビットを落としても待機条件が新たに成立することはないため、待機者への通知は行わない。
+		void clear(Flag pattern = kAllBits);
 		Flag get() const;
 	};
 } // namespace EFlag

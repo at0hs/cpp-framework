@@ -111,3 +111,34 @@ TEST_F(EventFlagTest, And_ExtraBitsSet_StillMatches) {
 	EXPECT_FALSE(
 		event_flag_.timed_wait(0x03, EFlag::MatchMode::AND, std::chrono::milliseconds(100)));
 }
+
+TEST_F(EventFlagTest, Clear_SpecifiedBits) {
+	event_flag_.set(0x07);
+
+	event_flag_.clear(0x02);
+
+	EXPECT_EQ(0x05U, event_flag_.get());
+}
+
+TEST_F(EventFlagTest, Clear_AllBitsByDefault) {
+	event_flag_.set(0xFF);
+
+	event_flag_.clear();
+
+	EXPECT_EQ(0U, event_flag_.get());
+}
+
+TEST_F(EventFlagTest, Clear_ThenWaitBlocksUntilSetAgain) {
+	// クリア後は再度 set されるまで待機が成立しない
+	event_flag_.set(0x01);
+	event_flag_.clear(0x01);
+
+	EXPECT_FALSE(
+		event_flag_.timed_wait(0x01, EFlag::MatchMode::OR, std::chrono::milliseconds(100)));
+
+	std::thread t{ [&] {
+		event_flag_.set(0x01);
+	} };
+	EXPECT_TRUE(event_flag_.timed_wait(0x01, EFlag::MatchMode::OR, std::chrono::seconds(1)));
+	t.join();
+}

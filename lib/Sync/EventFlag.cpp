@@ -30,6 +30,12 @@ namespace EFlag {
 		condition_.notify_all();
 	}
 
+	void EventFlag::clear(Flag pattern) {
+		// set() / wait() の判定と排他するため mutex 下で更新する
+		std::scoped_lock const lock(mutex_);
+		pattern_ &= ~pattern;
+	}
+
 	Flag EventFlag::get() const {
 		return pattern_.load();
 	}
