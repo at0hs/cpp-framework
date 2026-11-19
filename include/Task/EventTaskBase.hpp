@@ -7,6 +7,7 @@
 #include <functional>
 #include <future>
 #include <memory>
+#include <mutex>
 #include <string>
 #include <thread>
 
@@ -102,20 +103,21 @@ namespace Framework::Task {
 		using MessageQueue = Message::IMessageQueue<MessageContent>;
 
 		class Sender {
-			std::weak_ptr<MessageQueue> message_queue_;
+			EventTaskBase &owner_;
 			std::shared_ptr<Response> response_{ nullptr };
 			bool sent_{ false };
 
 		public:
-			Sender(const std::shared_ptr<MessageQueue> &message_queue, bool need_response = false)
-				: message_queue_(message_queue),
+			Sender(EventTaskBase &owner, bool need_response = false)
+				: owner_(owner),
 				  response_(need_response ? std::make_shared<Response>() : nullptr) {}
 
 			void send(Attribute attribute, const Request &request) {
-				if (auto message_queue = message_queue_.lock()) {
-					message_queue->send({ attribute, request, response_ });
-					sent_ = true;
-				}
+				sent_ = owner_.post({ attribute, request, response_ });
+			}
+
+			void send(Attribute attribute, Request &&request) {
+				sent_ = owner_.post({ attribute, std::move(request), response_ });
 			}
 
 			bool wait_for_response(std::chrono::milliseconds timeout_msec = kWaitForever) {
@@ -139,7 +141,15 @@ namespace Framework::Task {
 
 		std::function<void()> on_start_;
 		std::function<void()> on_finish_;
-		bool stopped_ = false;
+		bool stopped_ = false; // ワーカースレッドのみが参照する
+
+		// キューへの投入と「閉鎖 + 残メッセージの破棄」を排他し、
+		// 停止後に投入されたメッセージが応答されずに残る (RPC が永久に待つ) ことを防ぐ
+		std::mutex post_mutex_;
+		bool closed_ = false;
+
+		std::mutex stop_mutex_;
+		std::thread::id worker_id_; // 構築後は不変（stop() の自スレッド判定用）
 
 	public:
 		template <typename... AggregatorArgs>
@@ -149,6 +159,7 @@ namespace Framework::Task {
 			  message_queue_(Message::MessageQueueFactory::create<MessageContent>()) {
 			// NOLINTNEXTLINE(cppcoreguidelines-prefer-member-initializer)
 			thread_ = std::thread([this]() { main_loop(); });
+			worker_id_ = thread_.get_id();
 		}
 
 		~EventTaskBase() { stop(); }
@@ -159,17 +170,26 @@ namespace Framework::Task {
 		EventTaskBase &operator=(EventTaskBase &&) = delete;
 
 		void start() override {
-			Sender sender{ message_queue_, true };
+			Sender sender{ *this, true };
 			sender.send(Attribute::internal(),
 						Request{ "", static_cast<T>(InternalCommands::kStart) });
 			sender.wait_for_response();
 		}
 
+		/// メッセージポンプを停止する。停止要求より前に投入されたイベントは処理され、
+		/// 停止後に投入されたイベント (send_event / rpc_event / start) は破棄される
+		/// （rpc_event は false を返す）。イベントハンドラ内から呼ぶことも可能。
 		void stop() override {
+			if (std::this_thread::get_id() == worker_id_) {
+				// ハンドラ内からの停止: 自スレッドは join できないのでループ終了だけ指示する
+				stopped_ = true;
+				return;
+			}
+			std::scoped_lock const lock(stop_mutex_);
 			if (!is_running()) {
 				return;
 			}
-			Sender sender{ message_queue_, true };
+			Sender sender{ *this, true };
 			sender.send(Attribute::internal(),
 						Request{ "", static_cast<T>(InternalCommands::kStop) });
 			sender.wait_for_response();
@@ -177,25 +197,25 @@ namespace Framework::Task {
 		}
 
 		void send_event(Request &&request) override {
-			Sender sender(message_queue_, false);
+			Sender sender(*this, false);
 			sender.send(Attribute::external(), std::move(request));
 		}
 
 		void send_event(const Request &request) override {
-			Sender sender(message_queue_, false);
+			Sender sender(*this, false);
 			sender.send(Attribute::external(), request);
 		}
 
 		bool rpc_event(Request &&request,
 					   std::chrono::milliseconds timeout_msec = kWaitForever) override {
-			Sender sender(message_queue_, true);
+			Sender sender(*this, true);
 			sender.send(Attribute::external(), std::move(request));
 			return sender.wait_for_response(timeout_msec);
 		}
 
 		bool rpc_event(const Request &request,
 					   std::chrono::milliseconds timeout_msec = kWaitForever) override {
-			Sender sender(message_queue_, true);
+			Sender sender(*this, true);
 			sender.send(Attribute::external(), request);
 			return sender.wait_for_response(timeout_msec);
 		}
@@ -231,8 +251,30 @@ namespace Framework::Task {
 					}
 				}
 			}
+			close_and_discard();
 			if (on_finish_) {
 				on_finish_();
+			}
+		}
+
+		bool post(MessageContent &&content) {
+			std::scoped_lock const lock(post_mutex_);
+			if (closed_) {
+				return false;
+			}
+			message_queue_->send(std::move(content));
+			return true;
+		}
+
+		// 以降の投入を拒否し、未処理のメッセージには false を応答して破棄する
+		void close_and_discard() {
+			std::scoped_lock const lock(post_mutex_);
+			closed_ = true;
+			while (!message_queue_->is_empty()) {
+				MessageContent content = message_queue_->receive();
+				if (content.is_response_required()) {
+					content.get_response_buffer()->set(false);
+				}
 			}
 		}
 

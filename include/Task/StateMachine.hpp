@@ -4,7 +4,6 @@
 #include <atomic>
 #include <functional>
 #include <map>
-#include <stdexcept>
 #include <utility>
 
 #include "Exception/Error.hpp"
@@ -61,13 +60,14 @@ namespace Framework::Task {
 
 		void set_state(State new_state) {
 			State current_state = current_.load().state;
-			try {
-				current_.store({ new_state, table_.at(new_state) });
-				if (state_changed) {
-					state_changed(current_state, new_state);
-				}
-			} catch (const std::out_of_range &e) {
+			auto it = table_.find(new_state);
+			if (it == table_.end()) {
 				throw Exception("State not found", Error::Code::OutOfRange);
+			}
+			current_.store({ new_state, it->second });
+			// コールバックが投げた例外はそのまま呼び出し元へ伝搬させる
+			if (state_changed) {
+				state_changed(current_state, new_state);
 			}
 		}
 

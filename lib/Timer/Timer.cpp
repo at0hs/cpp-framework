@@ -1,5 +1,6 @@
 #include "Timer.hpp"
 #include <functional>
+#include <mutex>
 #include <thread>
 #include <vector>
 
@@ -22,9 +23,12 @@ void Timer::start() {
 			handlers = event_handlers_;
 		}
 		while (true) {
-			std::this_thread::sleep_for(this->time_);
-			if (!this->active_) {
-				break;
+			{
+				// stop() で即座に起こせるよう、sleep_for ではなく条件変数で待つ
+				std::unique_lock lock(state_mutex_);
+				if (state_cv_.wait_for(lock, time_, [this] { return !active_.load(); })) {
+					break;
+				}
 			}
 			for (const auto &f : handlers) {
 				std::invoke(f);
@@ -33,13 +37,16 @@ void Timer::start() {
 				break;
 			}
 		}
+		active_ = false;
 	} };
 }
 
 void Timer::stop() {
-	if (active_) {
+	{
+		std::scoped_lock const lock(state_mutex_);
 		active_ = false;
 	}
+	state_cv_.notify_all();
 }
 
 void Timer::wait_for_stop() {

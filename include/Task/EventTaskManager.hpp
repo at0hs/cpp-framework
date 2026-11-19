@@ -22,7 +22,10 @@ namespace Framework::Task {
 	/// 異なるコマンド型を持つタスクは別々の EventTaskManager インスタンスで管理すること。
 	///
 	/// スレッドセーフ: register_task / unregister_task は write ロック、
-	///                 send_event / rpc_event / クエリ系は read ロックで保護。
+	///                 クエリ系は read ロックで保護。
+	///                 send_event / rpc_event はタスクの shared_ptr を read ロック下で取得した後、
+	///                 ロックを解放してから送信する（RPC 待機中に登録・解除やハンドラからの
+	///                 再入がブロックされないようにするため）。
 	template <typename CommandType>
 		requires(std::is_integral_v<CommandType> || std::is_enum_v<CommandType>)
 	class EventTaskManager {
@@ -32,7 +35,7 @@ namespace Framework::Task {
 
 		EventTaskManager() = default;
 
-		~EventTaskManager() { tasks_.clear(); }
+		~EventTaskManager() = default;
 
 		// コピー・ムーブ不可（mutex を所有しているため）
 		EventTaskManager(const EventTaskManager &) = delete;
@@ -86,15 +89,13 @@ namespace Framework::Task {
 		/// @brief 名前を指定して fire-and-forget でイベントを送信する（右辺値参照版）。
 		/// @throws Framework::Exception (InvalidArgument) 指定した名前のタスクが存在しない場合
 		void send_event(const std::string &name, Request &&request) {
-			std::shared_lock lock(mutex_);
-			find_or_throw(name)->send_event(std::move(request));
+			get_task(name)->send_event(std::move(request));
 		}
 
 		/// @brief 名前を指定して fire-and-forget でイベントを送信する（const 左辺値参照版）。
 		/// @throws Framework::Exception (InvalidArgument) 指定した名前のタスクが存在しない場合
 		void send_event(const std::string &name, const Request &request) {
-			std::shared_lock lock(mutex_);
-			find_or_throw(name)->send_event(request);
+			get_task(name)->send_event(request);
 		}
 
 		/// @brief 名前を指定して同期 RPC イベントを送信する（右辺値参照版）。
@@ -103,8 +104,7 @@ namespace Framework::Task {
 		/// @throws Framework::Exception (InvalidArgument) 指定した名前のタスクが存在しない場合
 		bool rpc_event(const std::string &name, Request &&request,
 					   std::chrono::milliseconds timeout = IEventTask<CommandType>::kWaitForever) {
-			std::shared_lock lock(mutex_);
-			return find_or_throw(name)->rpc_event(std::move(request), timeout);
+			return get_task(name)->rpc_event(std::move(request), timeout);
 		}
 
 		/// @brief 名前を指定して同期 RPC イベントを送信する（const 左辺値参照版）。
@@ -113,8 +113,7 @@ namespace Framework::Task {
 		/// @throws Framework::Exception (InvalidArgument) 指定した名前のタスクが存在しない場合
 		bool rpc_event(const std::string &name, const Request &request,
 					   std::chrono::milliseconds timeout = IEventTask<CommandType>::kWaitForever) {
-			std::shared_lock lock(mutex_);
-			return find_or_throw(name)->rpc_event(request, timeout);
+			return get_task(name)->rpc_event(request, timeout);
 		}
 
 	private:

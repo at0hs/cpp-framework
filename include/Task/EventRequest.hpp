@@ -30,38 +30,13 @@ namespace Framework::Task {
 			: from_(std::move(from)),
 			  command_(command) {}
 
-		EventRequest(const EventRequest &other) : from_(other.from_), command_(other.command_) {
-			if (other.has_payload()) {
-				payload_ = other.payload_;
-			}
-		}
-
-		EventRequest(EventRequest &&other) noexcept
-			: from_(std::move(other.from_)),
-			  command_(other.command_),
-			  payload_(std::move(other.payload_)) {}
-
+		// 全メンバがコピー・ムーブ可能なのでコンパイラ生成のものを使う。
+		// （独自実装では、ペイロードを持たない要求をコピー代入した際に古いペイロードが残っていた）
+		EventRequest(const EventRequest &) = default;
+		EventRequest(EventRequest &&) noexcept = default;
+		EventRequest &operator=(const EventRequest &) = default;
+		EventRequest &operator=(EventRequest &&) noexcept = default;
 		~EventRequest() = default;
-
-		EventRequest &operator=(EventRequest &&other) noexcept {
-			if (this != &other) {
-				from_ = std::move(other.from_);
-				command_ = other.command_;
-				payload_ = std::move(other.payload_);
-			}
-			return *this;
-		}
-
-		EventRequest &operator=(const EventRequest &other) {
-			if (this != &other) {
-				from_ = other.from_;
-				command_ = other.command_;
-				if (other.has_payload()) {
-					payload_ = other.payload_;
-				}
-			}
-			return *this;
-		}
 
 		const std::string &get_from() const { return from_; }
 

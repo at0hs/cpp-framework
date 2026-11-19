@@ -3,6 +3,7 @@
 
 #include <atomic>
 #include <chrono>
+#include <condition_variable>
 #include <functional>
 #include <mutex>
 #include <thread>
@@ -13,6 +14,8 @@ class Timer {
 	std::atomic<bool> restart_{ false };
 	std::atomic<bool> active_{ false };
 	std::thread thread_;
+	std::mutex state_mutex_;
+	std::condition_variable state_cv_;
 	std::mutex handlers_mutex_;
 	std::vector<std::function<void()>> event_handlers_;
 
@@ -33,8 +36,11 @@ public:
 		event_handlers_.emplace_back(f);
 	}
 
+	// 開始時点で登録済みのリスナーが対象となる
 	void start();
+	// 待機中のタイマースレッドを即座に起こして停止させる（join はしない）
 	void stop();
+	// stop() してタイマースレッドの終了を待つ
 	void wait_for_stop();
 };
 #endif // INCLUDE_TIMER_HPP

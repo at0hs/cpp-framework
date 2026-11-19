@@ -159,3 +159,9 @@ TEST_F(PosixMQTest, MultipleSendersSingleReceiver) {
 
 	EXPECT_EQ(total, received_count.load());
 }
+
+TEST(PosixMQErrorTest, AttachWithDifferentMessageSizeThrows) {
+	// 既存キューのメッセージサイズが T と異なる場合は接続時に検出する
+	PosixMessageQueue<int> owner("/fw_size_mismatch_mq", Owner{});
+	EXPECT_THROW(PosixMessageQueue<double>("/fw_size_mismatch_mq", Attach{}), Framework::Exception);
+}

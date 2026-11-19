@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <atomic>
+#include <future>
 #include <thread>
 #include <tuple>
 
@@ -252,4 +253,35 @@ TEST_F(EventTaskManagerTest, MultipleTasksIndependentRouting) {
 
 	task1->stop();
 	task2->stop();
+}
+
+TEST(EventTaskManagerRegressionTest, RegisterDuringRpc_IsNotBlocked) {
+	// RPC の応答待ち中も登録・解除がブロックされないこと
+	EventTaskManager<int64_t> manager;
+	std::promise<void> entered;
+	std::promise<void> release;
+	auto release_future = release.get_future().share();
+	const MessageTask<int64_t>::EventMap events{
+		{ 1, { [&entered, release_future](const EventRequest<int64_t> &) {
+			  entered.set_value();
+			  release_future.wait();
+			  return true;
+		  } } }
+	};
+	auto task = std::make_shared<MessageTask<int64_t>>("slow", events);
+	task->start();
+	manager.register_task("slow", task);
+
+	auto rpc = std::async(std::launch::async, [&manager] {
+		return manager.rpc_event("slow", EventRequest<int64_t>("", 1));
+	});
+	entered.get_future().wait();
+
+	auto reg =
+		std::async(std::launch::async, [&manager, &task] { manager.register_task("other", task); });
+	EXPECT_EQ(std::future_status::ready, reg.wait_for(std::chrono::seconds(2)));
+
+	release.set_value();
+	EXPECT_TRUE(rpc.get());
+	reg.get();
 }

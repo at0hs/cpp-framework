@@ -1,6 +1,8 @@
 #ifndef INCLUDE_TASK_TASKBASE_HPP
 #define INCLUDE_TASK_TASKBASE_HPP
 
+#include <cstdint>
+#include <string>
 #include <thread>
 
 namespace Framework::Task {

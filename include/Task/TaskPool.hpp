@@ -1,17 +1,12 @@
 #ifndef INCLUDE_TASK_TASKPOOL_HPP
 #define INCLUDE_TASK_TASKPOOL_HPP
-#include <sched.h>
-#include <unistd.h>
-#ifndef __GNU_SOURCE
-#define __GNU_SOURCE
-#include <pthread.h>
-#undef __GNU_SOURCE
-#endif
 #include <atomic>
 #include <condition_variable>
 #include <deque>
 #include <functional>
 #include <mutex>
+#include <string>
+#include <thread>
 #include <vector>
 
 #include "Task/TaskBase.hpp"

@@ -6,7 +6,8 @@ namespace EFlag {
 
 	bool EventFlag::match(Flag pattern, MatchMode mode) const {
 		if (mode == MatchMode::AND) {
-			return pattern == pattern_.load();
+			// pattern の全ビットが立っていれば成立（他のビットが立っていても良い）
+			return (pattern & pattern_.load()) == pattern;
 		}
 		return (pattern & pattern_.load()) != 0;
 	}

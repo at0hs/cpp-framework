@@ -1,5 +1,8 @@
 #include "EventAggregatorTest.hpp"
 
+#include <stdexcept>
+
+#include "Exception/Exception.hpp"
 #include "Task/MessageEventAggregator.hpp"
 
 using namespace Framework::Task;
@@ -86,4 +89,13 @@ TEST_F(EventAggregatorTest, AddMethod) {
 	EventRequest<> req("test", 0);
 	EXPECT_TRUE(aggregator.publish(0, req));
 	EXPECT_EQ(0, received);
+}
+
+TEST(EventAggregatorRegressionTest, HandlerOutOfRange_IsPropagatedAsIs) {
+	// ハンドラ自身が投げた std::out_of_range は「イベント未登録」に変換されない
+	MessageEventAggregator<> aggregator;
+	aggregator.add(1, [](const EventRequest<> &) -> bool { throw std::out_of_range("handler"); });
+
+	EXPECT_THROW(aggregator.publish(1, EventRequest<>("", 1)), std::out_of_range);
+	EXPECT_THROW(aggregator.publish(2, EventRequest<>("", 2)), Framework::Exception);
 }

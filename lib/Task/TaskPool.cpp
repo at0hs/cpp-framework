@@ -5,6 +5,7 @@
 #include <pthread.h>
 #include <sched.h>
 #include <string>
+#include <thread>
 #include <utility>
 
 namespace Framework::Task {
@@ -26,7 +27,11 @@ namespace Framework::Task {
 	}
 
 	void TaskPool::stop() {
-		stop_ = true;
+		{
+			// mutex 下で更新しないと、述語評価後〜待機開始前のワーカーが通知を取りこぼす
+			std::scoped_lock const lock(mutex_);
+			stop_ = true;
+		}
 		condition_.notify_all();
 		for (auto &worker : workers_) {
 			if (worker.joinable()) {
@@ -89,10 +94,16 @@ namespace Framework::Task {
 	}
 
 	size_t TaskPool::get_concurrency() {
-		cpu_set_t cpu_set{ 0 };
+		cpu_set_t cpu_set;
 		CPU_ZERO(&cpu_set);
-		pthread_getaffinity_np(pthread_self(), sizeof(cpu_set), &cpu_set);
-		return static_cast<size_t>(CPU_COUNT(&cpu_set));
+		if (pthread_getaffinity_np(pthread_self(), sizeof(cpu_set), &cpu_set) == 0) {
+			const int count = CPU_COUNT(&cpu_set);
+			if (count > 0) {
+				return static_cast<size_t>(count);
+			}
+		}
+		const unsigned int hw = std::thread::hardware_concurrency();
+		return hw > 0 ? hw : 1;
 	}
 
 } // namespace Framework::Task

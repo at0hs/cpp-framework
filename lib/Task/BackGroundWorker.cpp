@@ -12,17 +12,15 @@ namespace Framework::Task {
 		: TaskBase(TaskType::BackGround, name),
 		  task_(std::move(task)) {
 		thread_ = std::thread([this] {
-			while (true) {
-				sleep();
-				if (stop_) {
-					break;
-				}
+			while (sleep()) {
 				on_do_task();
 			}
 		});
 	}
 
 	BackGroundWorker::~BackGroundWorker() {
+		// 実行中のタスクにはキャンセル要求を伝え、早期終了の機会を与える
+		cancellation_pending_ = true;
 		{
 			std::scoped_lock const lock(mutex_);
 			stop_ = true;
@@ -58,9 +56,10 @@ namespace Framework::Task {
 		return running_;
 	}
 
-	void BackGroundWorker::sleep() {
+	bool BackGroundWorker::sleep() {
 		std::unique_lock<std::mutex> lock(mutex_);
 		condition_.wait(lock, [this] { return running_.load() || stop_; });
+		return !stop_;
 	}
 
 	void BackGroundWorker::on_do_task() {
@@ -70,6 +69,9 @@ namespace Framework::Task {
 			task_(*this, args);
 		} catch (const Framework::Exception &e) {
 			error = e.get_code();
+		} catch (...) {
+			// ワーカースレッド外へ例外を逃がすと std::terminate になるため、ここで握る
+			error = Framework::Error::Code::Unknown;
 		}
 		on_task_completed(args, error);
 	}

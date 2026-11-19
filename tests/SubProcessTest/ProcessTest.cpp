@@ -13,14 +13,11 @@ using namespace Framework::SubProcess;
 // =============================================================================
 // ヘルパー
 // =============================================================================
-// 静的ファクトリー Process::start(StartInfo) は内部で生成した Process が
-// デタッチスレッドより先に破棄されるため use-after-free になる。
-// テストではインスタンスメソッドを直接呼ぶことで安全に動作させる。
 namespace {
 	// Process インスタンスを生成して start() を呼び、結果を返す
 	ProcessResult run_process(StartInfo info) {
 		Process proc{ std::move(info) };
-		return proc.start(); // proc.start_async().get() と等価、get() 後に has_exited_=true
+		return proc.start(); // proc.start_async().get() と等価
 	}
 } // namespace
 
@@ -384,10 +381,9 @@ TEST_F(ProcessTest, Destructor_KillsRunningChild_PidNoLongerExists) {
 		ASSERT_GT(proc.id(), 0);
 		child_pid = proc.id();
 
-		// proc のデストラクタがここで動き、子プロセスに SIGKILL を送って waitpid する。
-		// collect_result スレッドが this (= &proc) に書き込む前に proc が破棄されるため、
-		// スタック上の has_exited_ への書き込みが残るが、テスト環境では実害は生じない。
-		(void)future; // future は proc より先にスコープを抜けると UB が増すので保持
+		// proc のデストラクタがここで動き、子プロセスに SIGKILL を送って回収を待つ。
+		// 回収スレッドは proc ではなく共有状態のみを参照するため、破棄順序に依存しない。
+		(void)future;
 	}
 
 	// Assert: スコープ脱出後、子プロセスは存在しない
@@ -395,4 +391,48 @@ TEST_F(ProcessTest, Destructor_KillsRunningChild_PidNoLongerExists) {
 	int ret = ::kill(child_pid, 0);
 	EXPECT_EQ(-1, ret);
 	EXPECT_EQ(ESRCH, errno);
+}
+
+// =============================================================================
+// 回帰: stdout / stderr 両方をリダイレクトし、stderr にパイプ容量超を書いてもデッドロックしない
+// =============================================================================
+
+TEST_F(ProcessTest, RedirectBoth_LargeStderr_DoesNotDeadlock) {
+	// Arrange: パイプバッファ (通常 64KiB) を超える量を stderr に書いた後で stdout に書く
+	StartInfo info;
+	info.command() = "head -c 200000 /dev/zero | tr '\\0' 'e' >&2; echo done";
+	info.use_shell() = true;
+	info.redirect_standard_output() = true;
+	info.redirect_standard_error() = true;
+	Process proc{ info };
+
+	// Act
+	auto future = proc.start_async();
+
+	// Assert: 一定時間内に完了し、両方の出力を取得できる
+	ASSERT_EQ(std::future_status::ready, future.wait_for(std::chrono::seconds(5)));
+	auto result = future.get();
+	EXPECT_EQ(0, result.exit_code());
+	EXPECT_EQ("done\n", result.standard_output());
+	EXPECT_EQ(200000U, result.standard_error().size());
+}
+
+// =============================================================================
+// 回帰: 実行中の Process をムーブしても回収・kill が正しく動作する
+// =============================================================================
+
+TEST_F(ProcessTest, Move_WhileRunning_KillWorksOnMovedObject) {
+	// Arrange
+	StartInfo info("sleep");
+	info.arguments().push_back("10");
+	Process original{ info };
+	auto future = original.start_async();
+	Process moved{ std::move(original) };
+
+	// Act
+	moved.kill();
+
+	// Assert
+	EXPECT_TRUE(moved.has_exited());
+	EXPECT_EQ(std::future_status::ready, future.wait_for(std::chrono::seconds(2)));
 }
