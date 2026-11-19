@@ -42,3 +42,14 @@ TEST_F(EventRequestTest, CopyAssignment) {
 	EXPECT_TRUE(request2.has_payload());
 	EXPECT_STREQ(input.c_str(), request2.get_payload_as<std::string>().c_str());
 }
+
+TEST_F(EventRequestTest, CopyAssign_FromRequestWithoutPayload_ClearsPayload) {
+	EventRequest<> with_payload("a", 1, std::any(42));
+	const EventRequest<> without_payload("b", 2);
+
+	with_payload = without_payload;
+
+	EXPECT_EQ("b", with_payload.get_from());
+	EXPECT_EQ(2, with_payload.get_command());
+	EXPECT_FALSE(with_payload.has_payload());
+}

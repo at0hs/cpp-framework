@@ -4,7 +4,6 @@
 #include <cstdint>
 #include <functional>
 #include <map>
-#include <stdexcept>
 #include <utility>
 
 #include "Exception/Error.hpp"
@@ -53,20 +52,30 @@ namespace Framework::Task {
 		}
 
 		bool publish(Command command, const EventRequest<T> &req) {
-			try {
-				auto &info = events_.at(command);
-				return info.handle(req);
-			} catch (const std::out_of_range &e) {
-				throw Exception("Event not found", Error::Code::OutOfRange);
-			}
+			// ハンドラ自身が投げた std::out_of_range を「イベント未登録」と誤認しないよう、
+			// 検索とハンドラ呼び出しを分離する
+			return find_or_throw(command).handle(req);
 		}
 
 		State get_next_state(Command command) const {
-			try {
-				return events_.at(command).get_next_state();
-			} catch (const std::out_of_range &e) {
+			return find_or_throw(command).get_next_state();
+		}
+
+	private:
+		MessageInfo &find_or_throw(Command command) {
+			auto it = events_.find(command);
+			if (it == events_.end()) {
 				throw Exception("Event not found", Error::Code::OutOfRange);
 			}
+			return it->second;
+		}
+
+		const MessageInfo &find_or_throw(Command command) const {
+			auto it = events_.find(command);
+			if (it == events_.end()) {
+				throw Exception("Event not found", Error::Code::OutOfRange);
+			}
+			return it->second;
 		}
 	};
 } // namespace Framework::Task

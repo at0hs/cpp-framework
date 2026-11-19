@@ -98,3 +98,16 @@ TEST_F(EventFlagTest, WaitMultiple_2) {
 
 	EXPECT_EQ(1, exited);
 }
+
+TEST_F(EventFlagTest, And_ExtraBitsSet_StillMatches) {
+	// AND 待ちは指定ビットがすべて立っていれば成立する（他のビットが立っていても良い）
+	event_flag_.set(0x01);
+	event_flag_.set(0x04);
+
+	EXPECT_TRUE(
+		event_flag_.timed_wait(0x01, EFlag::MatchMode::AND, std::chrono::milliseconds(100)));
+	EXPECT_TRUE(
+		event_flag_.timed_wait(0x05, EFlag::MatchMode::AND, std::chrono::milliseconds(100)));
+	EXPECT_FALSE(
+		event_flag_.timed_wait(0x03, EFlag::MatchMode::AND, std::chrono::milliseconds(100)));
+}

@@ -110,7 +110,8 @@ namespace Framework::Task {
 		};
 
 	private:
-		void sleep();
+		// タスク実行要求または停止要求まで待機する。停止要求なら false。
+		bool sleep();
 		void on_do_task();
 		void on_task_completed(DoTaskEventArgs &do_task_event_args, Framework::Error::Code error);
 	};

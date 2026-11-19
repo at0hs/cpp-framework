@@ -43,6 +43,9 @@ namespace Framework::Templates {
 
 			ReadOnly(const T &value) : Base<const T>(value) {}
 
+			// 一時オブジェクトへの参照を保持するとダングリングになるため禁止
+			ReadOnly(const T &&) = delete;
+
 			operator auto() const { return Getter::get(this->value_.get()); }
 		};
 
@@ -53,6 +56,8 @@ namespace Framework::Templates {
 
 		public:
 			Writable(T &value) : ReadOnly<T, Getter>(value), mutable_ref_(value) {}
+
+			Writable(const T &&) = delete;
 
 			auto &operator=(const T &value) {
 				Setter::set(mutable_ref_.get(), value);

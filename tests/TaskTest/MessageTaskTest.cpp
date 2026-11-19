@@ -1,5 +1,6 @@
 #include "MessageTaskTest.hpp"
 
+#include <future>
 #include <thread>
 
 #include "Exception/Error.hpp"
@@ -169,4 +170,37 @@ TEST_F(MessageTaskTest, ExceptionInHandler) {
 	}
 	EXPECT_EQ(static_cast<int>(Framework::Error::Code::OutOfRange),
 			  static_cast<int>(exception.get_code()));
+}
+
+TEST_F(MessageTaskTest, RpcAndStartAfterStop_ReturnImmediately) {
+	// 停止後の rpc_event / start が永久にブロックせず戻ること
+	MessageTask<Commands> task("TestTask", kEvents);
+	task.start();
+	task.stop();
+
+	auto future = std::async(std::launch::async, [&task] {
+		task.start();
+		return task.rpc_event(EventRequest<Commands>{ "", Commands::TestCommand1 });
+	});
+
+	ASSERT_EQ(std::future_status::ready, future.wait_for(std::chrono::seconds(2)));
+	EXPECT_FALSE(future.get());
+}
+
+TEST_F(MessageTaskTest, StopFromHandler_DoesNotDeadlock) {
+	// ハンドラ内から stop() してもデッドロックせず、以後の RPC は false になる
+	MessageTask<Commands> *self = nullptr;
+	const MessageTask<Commands>::EventMap events{ { Commands::TestCommand1,
+													{ [&self](const EventRequest<Commands> &) {
+														self->stop();
+														return true;
+													} } },
+												  { Commands::TestCommand2, { test_handler } } };
+	MessageTask<Commands> task("TestTask", events);
+	self = &task;
+	task.start();
+
+	EXPECT_TRUE(task.rpc_event(EventRequest<Commands>{ "", Commands::TestCommand1 }));
+	EXPECT_FALSE(task.rpc_event(EventRequest<Commands>{ "", Commands::TestCommand2 },
+								std::chrono::seconds(2)));
 }

@@ -11,7 +11,12 @@ namespace Framework::Task {
 	public:
 		static constexpr auto kWaitForever = std::chrono::milliseconds::zero();
 
-		// IEventTask(TaskType type, const std::string &name) : TaskBase(type, name) {}
+		IEventTask() = default;
+		virtual ~IEventTask() = default;
+		IEventTask(const IEventTask &) = delete;
+		IEventTask &operator=(const IEventTask &) = delete;
+		IEventTask(IEventTask &&) = delete;
+		IEventTask &operator=(IEventTask &&) = delete;
 
 		virtual void start() = 0;
 		virtual void stop() = 0;

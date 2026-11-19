@@ -47,13 +47,35 @@ namespace Framework::Message {
 		}
 
 		static timespec to_abs_timespec(std::chrono::milliseconds ms) {
-			struct timespec ts{};
+			struct timespec ts {};
+
 			clock_gettime(CLOCK_REALTIME, &ts);
 			const auto extra_ns = ms.count() * 1'000'000LL;
 			ts.tv_nsec += extra_ns % 1'000'000'000LL;
 			ts.tv_sec += (ms.count() / 1000) + (ts.tv_nsec / 1'000'000'000LL);
 			ts.tv_nsec %= 1'000'000'000LL;
 			return ts;
+		}
+
+		// 既存キューに接続した場合、メッセージサイズが T と一致しないと
+		// send / receive が EMSGSIZE で失敗するため、開いた直後に検証する。
+		// 失敗時はコンストラクタから例外を投げる（デストラクタは呼ばれない）ので、ここで閉じる。
+		void validate_attributes() {
+			struct mq_attr attr {};
+
+			if (mq_getattr(mqd_, &attr) < 0) {
+				const auto saved_errno = errno;
+				mq_close(mqd_);
+				throw Framework::SystemException("PosixMessageQueue: mq_getattr failed",
+												 saved_errno);
+			}
+			if (attr.mq_msgsize != static_cast<long>(kMsgSize)) {
+				mq_close(mqd_);
+				throw Framework::Exception("PosixMessageQueue: message size mismatch (queue: " +
+											   std::to_string(attr.mq_msgsize) +
+											   ", T: " + std::to_string(kMsgSize) + ")",
+										   Error::Code::TypeMismatch);
+			}
 		}
 
 		void do_send(const T &message) {
@@ -70,7 +92,9 @@ namespace Framework::Message {
 			: name_(name),
 			  owner_(true) {
 			validate_name(name);
-			struct mq_attr attr{};
+
+			struct mq_attr attr {};
+
 			attr.mq_maxmsg = static_cast<long>(max_msg);
 			attr.mq_msgsize = static_cast<long>(kMsgSize);
 
@@ -79,6 +103,8 @@ namespace Framework::Message {
 				throw Framework::SystemException("PosixMessageQueue: mq_open(O_CREAT) failed",
 												 errno);
 			}
+			// 同名キューが既に存在した場合、attr は無視されて既存キューが開かれる
+			validate_attributes();
 		}
 
 		// --- Attach コンストラクタ ---
@@ -89,6 +115,7 @@ namespace Framework::Message {
 				throw Framework::SystemException("PosixMessageQueue: mq_open(attach) failed",
 												 errno);
 			}
+			validate_attributes();
 		}
 
 		~PosixMessageQueue() {
@@ -140,8 +167,10 @@ namespace Framework::Message {
 
 		void clear() override {
 			// 一時的に O_NONBLOCK を設定してドレイン
-			struct mq_attr nonblock_attr{};
-			struct mq_attr old_attr{};
+			struct mq_attr nonblock_attr {};
+
+			struct mq_attr old_attr {};
+
 			nonblock_attr.mq_flags = O_NONBLOCK;
 			if (mq_setattr(mqd_, &nonblock_attr, &old_attr) < 0) {
 				throw Framework::SystemException("PosixMessageQueue::clear failed to set nonblock",
@@ -168,7 +197,8 @@ namespace Framework::Message {
 		}
 
 		std::size_t num_message() const override {
-			struct mq_attr attr{};
+			struct mq_attr attr {};
+
 			if (mq_getattr(mqd_, &attr) < 0) {
 				throw Framework::SystemException("PosixMessageQueue::num_message failed", errno);
 			}
