@@ -12,3 +12,14 @@ HTML/
 CLAUDE.md
 .cache/
 cmake-build-debug/
+
+# build directories (e.g. build-cov/)
+build-*/
+
+# coverage
+coverage/
+coverage.info
+coverage.xml
+*.gcda
+*.gcno
+*.gcov

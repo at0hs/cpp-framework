@@ -28,5 +28,12 @@ message(STATUS "Project home: " ${HOME})
 #
 # sub directories
 #
+enable_testing()
 add_subdirectory(lib)
 add_subdirectory(tests)
+
+#
+# coverage target (TestPlus only)
+#
+list(APPEND CMAKE_MODULE_PATH ${HOME}/cmake)
+include(Coverage)
